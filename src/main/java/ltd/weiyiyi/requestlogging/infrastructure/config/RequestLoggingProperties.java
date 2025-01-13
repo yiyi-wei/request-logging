@@ -119,6 +119,11 @@ public class RequestLoggingProperties {
     private String requestEndFlag = "<<< Request End <<<";
 
     /**
+     * 请求错误标记
+     */
+    private String requestErrorFlag = "--- Request Error ---";
+
+    /**
      * INFO级别前景色 - 浅绿色
      */
     private String infoForegroundColor = "(144,238,144)";
@@ -555,6 +560,14 @@ public class RequestLoggingProperties {
 
     public void setRequestEndFlag(String requestEndFlag) {
         this.requestEndFlag = requestEndFlag;
+    }
+
+    public String getRequestErrorFlag() {
+        return requestErrorFlag;
+    }
+
+    public void setRequestErrorFlag(String requestErrorFlag) {
+        this.requestErrorFlag = requestErrorFlag;
     }
 
     public boolean isEnableFileLogging() {
