@@ -1,0 +1,12 @@
+# Auto Configure
+org.springframework.boot.autoconfigure.EnableAutoConfiguration=\
+ltd.weiyiyi.requestlogging.infrastructure.config.RequestLoggingAutoConfiguration
+
+# Environment Post Processors
+org.springframework.boot.env.EnvironmentPostProcessor=\
+ltd.weiyiyi.requestlogging.infrastructure.config.RequestLoggingEnvironmentPostProcessor
+
+# SPI Implementations
+ltd.weiyiyi.requestlogging.infrastructure.spi.RequestLogProcessor=\
+ltd.weiyiyi.requestlogging.infrastructure.processor.ConsoleLogProcessor,\
+ltd.weiyiyi.requestlogging.infrastructure.processor.FileLogProcessor
