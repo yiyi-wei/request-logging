@@ -6,13 +6,13 @@ import ltd.weiyiyi.requestlogging.domain.model.RequestLog;
 import ltd.weiyiyi.requestlogging.infrastructure.color.ColorPair;
 import ltd.weiyiyi.requestlogging.infrastructure.color.ColorProcessorFactory;
 import ltd.weiyiyi.requestlogging.infrastructure.config.RequestLoggingProperties;
+import ltd.weiyiyi.requestlogging.infrastructure.util.SystemMetricsCollector;
 
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Collections;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * 日志格式化器
@@ -37,7 +37,7 @@ public class LogFormatter {
         StringBuilder builder = new StringBuilder();
         
         // Separator
-        builder.append(properties.getRequestStartFlag()).append("\n");
+        builder.append(properties.getSeparator()).append("\n");
 
         // Request Start Flag
         builder.append(properties.getRequestStartFlag()).append("\n");
@@ -144,13 +144,22 @@ public class LogFormatter {
         if (properties.isLogHeaders() && requestLog.getHeaders() != null) {
             builder.append("Headers        :\n");
             formatHeaders(builder, requestLog.getHeaders());
+            builder.append("\n");
         }
         
         // Error Details
-        builder.append("\nError Details  :\n");
+        builder.append("Error Details  :\n");
         if (requestLog.getException() != null) {
             builder.append(String.format("  - Error Type   : %s\n", requestLog.getException()));
             builder.append(String.format("  - Error Message: %s\n", requestLog.getExceptionMessage()));
+            builder.append("  - Stack Trace  : \n");
+            // 添加堆栈跟踪信息的格式化
+            if (requestLog.getStackTrace() != null) {
+                String[] stackTraceLines = requestLog.getStackTrace().split("\n");
+                for (String line : stackTraceLines) {
+                    builder.append("        ").append(line.trim()).append("\n");
+                }
+            }
         }
         
         // Error Context
@@ -231,18 +240,20 @@ public class LogFormatter {
     }
 
     private String getInstanceId() {
-        return "service-instance-1";
+        return SystemMetricsCollector.getInstanceId();
     }
 
     private String getHostInfo() {
-        return "example.com";
+        return SystemMetricsCollector.getHostName();
     }
 
     private void appendSystemContext(StringBuilder builder) {
         builder.append("  - System Context:\n");
-        builder.append(String.format("      - CPU Load     : %.0f%%\n", 75.0));
-        builder.append(String.format("      - Memory Usage : %.1fGB / %.1fGB\n", 1.2, 2.0));
+        builder.append(String.format("      - CPU Load     : %.1f%%\n", SystemMetricsCollector.getCpuLoad()));
+        builder.append(String.format("      - Memory Usage : %.1fGB / %.1fGB\n", 
+            SystemMetricsCollector.getUsedMemory(), 
+            SystemMetricsCollector.getTotalMemory()));
         builder.append(String.format("      - Thread Count : %d\n", Thread.activeCount()));
-        builder.append(String.format("      - Environment  : %s\n", "Production"));
+        builder.append(String.format("      - Environment  : %s\n", SystemMetricsCollector.getEnvironment()));
     }
 } 

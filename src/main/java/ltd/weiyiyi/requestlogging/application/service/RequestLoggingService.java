@@ -19,6 +19,8 @@ import java.util.List;
 import java.util.Random;
 import java.util.ServiceLoader;
 import java.util.UUID;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 
 /**
  * 请求日志服务
@@ -179,6 +181,11 @@ public class RequestLoggingService {
             if (exception != null) {
                 log.setException(exception.getClass().getName());
                 log.setExceptionMessage(exception.getMessage());
+                // 添加堆栈跟踪信息
+                StringWriter sw = new StringWriter();
+                PrintWriter pw = new PrintWriter(sw);
+                exception.printStackTrace(pw);
+                log.setStackTrace(sw.toString());
             }
 
             logProcessors.forEach(processor -> processor.processRequestError(log));

@@ -65,7 +65,7 @@ public class RequestLoggingFilter implements Filter, Ordered {
             requestLoggingService.logResponse(wrappedRequest, wrappedResponse);
             wrappedResponse.copyBodyToResponse();
         } catch (Exception e) {
-            logger.error("Error in request logging filter", e);
+            requestLoggingService.logError(wrappedRequest, wrappedResponse, e);
             throw e;
         } finally {
             requestLoggingService.clearThreadLocals();

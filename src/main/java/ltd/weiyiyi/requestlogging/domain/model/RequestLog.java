@@ -18,6 +18,7 @@ public class RequestLog {
     private int status;
     private String exception;
     private String exceptionMessage;
+    private String stackTrace;
     private LocalDateTime requestTime;
     private LocalDateTime responseTime;
     private long processingTime;
@@ -102,6 +103,14 @@ public class RequestLog {
         this.exceptionMessage = exceptionMessage;
     }
 
+    public String getStackTrace() {
+        return stackTrace;
+    }
+
+    public void setStackTrace(String stackTrace) {
+        this.stackTrace = stackTrace;
+    }
+
     public LocalDateTime getRequestTime() {
         return requestTime;
     }
@@ -124,13 +133,6 @@ public class RequestLog {
 
     public void setProcessingTime(long processingTime) {
         this.processingTime = processingTime;
-    }
-
-    public String getStackTrace() {
-        if (exception == null) {
-            return null;
-        }
-        return exception + (exceptionMessage != null ? ": " + exceptionMessage : "");
     }
 
     public Map<String, String> getHeaders() {
