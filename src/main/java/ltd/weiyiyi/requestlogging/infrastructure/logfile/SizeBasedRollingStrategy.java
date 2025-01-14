@@ -6,133 +6,134 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
-import java.text.SimpleDateFormat;
-import java.util.Date;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.locks.ReentrantLock;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
- * 基于大小滚动的日志文件策略
- * 当日志文件达到指定大小时创建新文件
+ * 基于文件大小的日志文件滚动策略
  *
  * @author weihan
  */
 public class SizeBasedRollingStrategy implements LogFileStrategy {
     private static final Logger logger = LoggerFactory.getLogger(SizeBasedRollingStrategy.class);
-    private static final String STRATEGY_NAME = "size";
+    private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+    private static final Pattern SEQUENCE_PATTERN = Pattern.compile("request-(\\d{4}-\\d{2}-\\d{2})-(\\d+)\\.log");
+    private static final String FILE_PREFIX = "request-";
     private static final String FILE_SUFFIX = ".log";
-    private static final long DEFAULT_MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
-    private static final int DEFAULT_MAX_FILES = 10;
 
-    private File baseDir;
-    private File currentFile;
     private final long maxFileSize;
     private final int maxFiles;
-    private final ReentrantLock lock = new ReentrantLock();
-    private final AtomicInteger currentFileIndex = new AtomicInteger(0);
-    private final SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd");
+    private String baseDir;
+    private final AtomicInteger currentSequence = new AtomicInteger(0);
 
-    public SizeBasedRollingStrategy() {
-        this(DEFAULT_MAX_FILE_SIZE, DEFAULT_MAX_FILES);
-    }
-
-    public SizeBasedRollingStrategy(long maxFileSize, int maxFiles) {
-        this.maxFileSize = maxFileSize;
+    public SizeBasedRollingStrategy(String maxFileSize, int maxFiles) {
+        this.maxFileSize = parseFileSize(maxFileSize);
         this.maxFiles = maxFiles;
     }
 
     @Override
-    public String getStrategyName() {
-        return STRATEGY_NAME;
-    }
-
-    @Override
-    public void init(File baseDir) {
-        if (!baseDir.exists() && !baseDir.mkdirs()) {
-            logger.error("Failed to create base directory: {}", baseDir);
-            throw new RuntimeException("Failed to create base directory: " + baseDir);
-        }
+    public void init(String baseDir) {
         this.baseDir = baseDir;
-        initializeCurrentFile();
+        try {
+            Files.createDirectories(Paths.get(baseDir));
+            initializeSequence();
+        } catch (IOException e) {
+            logger.error("Failed to create log directory: {}", baseDir, e);
+        }
     }
 
     @Override
     public File getLogFile(RequestLog log) {
-        try {
-            lock.lock();
-            if (currentFile == null || shouldRollOver()) {
-                rollOver();
-            }
-            if (!currentFile.exists()) {
-                if (!currentFile.createNewFile()) {
-                    logger.error("Failed to create log file: {}", currentFile);
-                    throw new RuntimeException("Failed to create log file: " + currentFile);
-                }
-            }
-            return currentFile;
-        } catch (Exception e) {
-            logger.error("Error getting log file", e);
-            throw new RuntimeException("Error getting log file", e);
-        } finally {
-            lock.unlock();
+        LocalDate today = LocalDate.now();
+        String date = today.format(DATE_FORMATTER);
+        
+        File currentFile = getCurrentFile(date);
+        if (currentFile.length() >= maxFileSize) {
+            currentSequence.incrementAndGet();
+            currentFile = getCurrentFile(date);
+            cleanup();
         }
+        
+        return currentFile;
+    }
+
+    @Override
+    public String getStrategyName() {
+        return "size";
     }
 
     @Override
     public void cleanup() {
-        if (baseDir == null || !baseDir.exists()) {
-            return;
-        }
-
-        File[] files = baseDir.listFiles((dir, name) -> name.startsWith("request-") && name.endsWith(FILE_SUFFIX));
-        if (files == null || files.length <= maxFiles) {
-            return;
-        }
-
-        // 按修改时间排序
-        Arrays.sort(files, Comparator.comparingLong(File::lastModified));
-
-        // 删除超出最大文件数的文件
-        for (int i = 0; i < files.length - maxFiles; i++) {
-            if (!files[i].delete()) {
-                logger.warn("Failed to delete old log file: {}", files[i].getAbsolutePath());
-            }
-        }
-    }
-
-    private void initializeCurrentFile() {
-        File[] files = baseDir.listFiles((dir, name) -> name.startsWith("request-") && name.endsWith(FILE_SUFFIX));
-        if (files != null && files.length > 0) {
-            Arrays.sort(files, Comparator.comparingLong(File::lastModified).reversed());
-            currentFile = files[0];
-            String fileName = currentFile.getName();
-            int index = extractIndex(fileName);
-            currentFileIndex.set(index);
-        } else {
-            rollOver();
-        }
-    }
-
-    private boolean shouldRollOver() {
-        return currentFile != null && currentFile.length() >= maxFileSize;
-    }
-
-    private void rollOver() {
-        int index = currentFileIndex.incrementAndGet();
-        String date = dateFormat.format(new Date());
-        String fileName = String.format("request-%s-%03d%s", date, index, FILE_SUFFIX);
-        currentFile = new File(baseDir, fileName);
-    }
-
-    private int extractIndex(String fileName) {
         try {
-            int start = fileName.lastIndexOf('-') + 1;
-            int end = fileName.lastIndexOf('.');
-            return Integer.parseInt(fileName.substring(start, end));
+            File dir = new File(baseDir);
+            File[] files = dir.listFiles((d, name) -> name.startsWith(FILE_PREFIX) && name.endsWith(FILE_SUFFIX));
+            if (files != null && files.length > maxFiles) {
+                Arrays.sort(files, Comparator.comparing(File::lastModified));
+                for (int i = 0; i < files.length - maxFiles; i++) {
+                    if (!files[i].delete()) {
+                        logger.warn("Failed to delete old log file: {}", files[i].getAbsolutePath());
+                    }
+                }
+            }
         } catch (Exception e) {
-            return 0;
+            logger.error("Failed to cleanup old log files", e);
+        }
+    }
+
+    private File getCurrentFile(String date) {
+        return new File(baseDir, String.format("%s%s-%d%s", FILE_PREFIX, date, currentSequence.get(), FILE_SUFFIX));
+    }
+
+    private void initializeSequence() {
+        File dir = new File(baseDir);
+        File[] files = dir.listFiles((d, name) -> name.startsWith(FILE_PREFIX) && name.endsWith(FILE_SUFFIX));
+        if (files != null) {
+            int maxSeq = 0;
+            String today = LocalDate.now().format(DATE_FORMATTER);
+            
+            for (File file : files) {
+                Matcher matcher = SEQUENCE_PATTERN.matcher(file.getName());
+                if (matcher.matches() && today.equals(matcher.group(1))) {
+                    int seq = Integer.parseInt(matcher.group(2));
+                    maxSeq = Math.max(maxSeq, seq);
+                }
+            }
+            
+            currentSequence.set(maxSeq);
+        }
+    }
+
+    private long parseFileSize(String size) {
+        size = size.toUpperCase().trim();
+        long multiplier = 1;
+        
+        if (size.endsWith("KB")) {
+            multiplier = 1024;
+            size = size.substring(0, size.length() - 2);
+        } else if (size.endsWith("MB")) {
+            multiplier = 1024 * 1024;
+            size = size.substring(0, size.length() - 2);
+        } else if (size.endsWith("GB")) {
+            multiplier = 1024 * 1024 * 1024;
+            size = size.substring(0, size.length() - 2);
+        } else if (size.endsWith("B")) {
+            size = size.substring(0, size.length() - 1);
+        }
+        
+        try {
+            return Long.parseLong(size.trim()) * multiplier;
+        } catch (NumberFormatException e) {
+            logger.warn("Invalid file size format: {}. Using default 100MB", size);
+            return 100 * 1024 * 1024;
         }
     }
 } 

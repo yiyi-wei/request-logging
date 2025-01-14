@@ -7,7 +7,7 @@ import java.util.List;
 
 /**
  * 请求日志配置属性
- * 
+ *
  * @author weihan
  */
 @ConfigurationProperties(prefix = "request-logging")
@@ -273,6 +273,41 @@ public class RequestLoggingProperties {
      */
     private int jsonIndent = 2;
 
+    /**
+     * 异步线程池核心线程数
+     */
+    private int asyncCorePoolSize = 2;
+
+    /**
+     * 异步线程池最大线程数
+     */
+    private int asyncMaxPoolSize = 5;
+
+    /**
+     * 异步线程池队列容量
+     */
+    private int asyncQueueCapacity = 100;
+
+    /**
+     * 是否启用对象池
+     */
+    private boolean enableObjectPool = true;
+
+    /**
+     * 对象池最大容量
+     */
+    private int objectPoolMaxSize = 200;
+
+    /**
+     * 对象异步线程的前缀名
+     */
+    private String threadNamePrefix = "request-logging-";
+
+    /**
+     * 是否启用JSON美化打印
+     */
+    private boolean jsonPrettyPrint = true;
+
     // Getters and Setters
     public boolean isEnabled() {
         return enabled;
@@ -280,6 +315,14 @@ public class RequestLoggingProperties {
 
     public void setEnabled(boolean enabled) {
         this.enabled = enabled;
+    }
+
+    public String getThreadNamePrefix() {
+        return threadNamePrefix;
+    }
+
+    public void setThreadNamePrefix(String threadNamePrefix) {
+        this.threadNamePrefix = threadNamePrefix;
     }
 
     public String getLogLevel() {
@@ -688,5 +731,53 @@ public class RequestLoggingProperties {
 
     public void setJsonIndent(int jsonIndent) {
         this.jsonIndent = jsonIndent;
+    }
+
+    public int getAsyncCorePoolSize() {
+        return asyncCorePoolSize;
+    }
+
+    public void setAsyncCorePoolSize(int asyncCorePoolSize) {
+        this.asyncCorePoolSize = asyncCorePoolSize;
+    }
+
+    public int getAsyncMaxPoolSize() {
+        return asyncMaxPoolSize;
+    }
+
+    public void setAsyncMaxPoolSize(int asyncMaxPoolSize) {
+        this.asyncMaxPoolSize = asyncMaxPoolSize;
+    }
+
+    public int getAsyncQueueCapacity() {
+        return asyncQueueCapacity;
+    }
+
+    public void setAsyncQueueCapacity(int asyncQueueCapacity) {
+        this.asyncQueueCapacity = asyncQueueCapacity;
+    }
+
+    public boolean isEnableObjectPool() {
+        return enableObjectPool;
+    }
+
+    public void setEnableObjectPool(boolean enableObjectPool) {
+        this.enableObjectPool = enableObjectPool;
+    }
+
+    public int getObjectPoolMaxSize() {
+        return objectPoolMaxSize;
+    }
+
+    public void setObjectPoolMaxSize(int objectPoolMaxSize) {
+        this.objectPoolMaxSize = objectPoolMaxSize;
+    }
+
+    public boolean isJsonPrettyPrint() {
+        return jsonPrettyPrint;
+    }
+
+    public void setJsonPrettyPrint(boolean jsonPrettyPrint) {
+        this.jsonPrettyPrint = jsonPrettyPrint;
     }
 } 

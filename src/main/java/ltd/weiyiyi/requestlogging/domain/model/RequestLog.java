@@ -4,7 +4,9 @@ import java.time.LocalDateTime;
 import java.util.Map;
 
 /**
- * 请求日志模型
+ * 请求日志实体
+ *
+ * @author weihan
  */
 public class RequestLog {
     private String traceId;
@@ -22,6 +24,7 @@ public class RequestLog {
     private LocalDateTime requestTime;
     private LocalDateTime responseTime;
     private long processingTime;
+    private Map<String, Object> systemMetrics;
 
     public String getTraceId() {
         return traceId;
@@ -141,5 +144,34 @@ public class RequestLog {
 
     public void setHeaders(Map<String, String> headers) {
         this.headers = headers;
+    }
+
+    public Map<String, Object> getSystemMetrics() {
+        return systemMetrics;
+    }
+
+    public void setSystemMetrics(Map<String, Object> systemMetrics) {
+        this.systemMetrics = systemMetrics;
+    }
+
+    /**
+     * 重置对象状态，用于对象池回收
+     */
+    public void reset() {
+        this.traceId = null;
+        this.requestTime = null;
+        this.responseTime = null;
+        this.method = null;
+        this.uri = null;
+        this.queryString = null;
+        this.clientIp = null;
+        this.headers = null;
+        this.requestBody = null;
+        this.status = 0;
+        this.responseBody = null;
+        this.exception = null;
+        this.exceptionMessage = null;
+        this.stackTrace = null;
+        this.systemMetrics = null;
     }
 }

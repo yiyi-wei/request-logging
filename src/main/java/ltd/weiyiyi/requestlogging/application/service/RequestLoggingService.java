@@ -1,29 +1,35 @@
 package ltd.weiyiyi.requestlogging.application.service;
 
+import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONWriter;
 import ltd.weiyiyi.requestlogging.domain.model.RequestLog;
 import ltd.weiyiyi.requestlogging.infrastructure.config.RequestLoggingProperties;
-import ltd.weiyiyi.requestlogging.infrastructure.processor.ConsoleLogProcessor;
-import ltd.weiyiyi.requestlogging.infrastructure.logfile.FileLogProcessor;
 import ltd.weiyiyi.requestlogging.infrastructure.formatter.LogFormatter;
+import ltd.weiyiyi.requestlogging.infrastructure.processor.ConsoleLogProcessor;
 import ltd.weiyiyi.requestlogging.infrastructure.spi.RequestLogProcessor;
+import ltd.weiyiyi.requestlogging.infrastructure.util.SystemMetricsCollector;
+import org.apache.commons.pool2.impl.GenericObjectPool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.web.util.ContentCachingRequestWrapper;
 import org.springframework.web.util.ContentCachingResponseWrapper;
-import org.springframework.util.StringUtils;
 
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Random;
 import java.util.ServiceLoader;
 import java.util.UUID;
-import java.io.PrintWriter;
-import java.io.StringWriter;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * 请求日志服务
+ * 负责处理请求日志的记录和分发
+ *
+ * @author weihan
  */
 public class RequestLoggingService {
     private static final Logger logger = LoggerFactory.getLogger(RequestLoggingService.class);
@@ -32,10 +38,16 @@ public class RequestLoggingService {
     private final LogFormatter logFormatter;
     private final List<RequestLogProcessor> logProcessors = new ArrayList<>();
     private final ThreadLocal<String> traceId = new ThreadLocal<>();
+    private final GenericObjectPool<RequestLog> requestLogPool;
+    private final SystemMetricsCollector systemMetricsCollector;
 
-    public RequestLoggingService(RequestLoggingProperties properties) {
+    public RequestLoggingService(RequestLoggingProperties properties, 
+                               GenericObjectPool<RequestLog> requestLogPool,
+                               SystemMetricsCollector systemMetricsCollector) {
         this.properties = properties;
-        this.logFormatter = new LogFormatter(properties);
+        this.logFormatter = new LogFormatter(properties, systemMetricsCollector);
+        this.requestLogPool = requestLogPool;
+        this.systemMetricsCollector = systemMetricsCollector;
         initLogProcessors();
     }
 
@@ -100,7 +112,7 @@ public class RequestLoggingService {
                 }
             }
             
-            logProcessors.forEach(processor -> processor.processRequestStart(log));
+            logProcessors.forEach(processor -> processor.process(log));
         } catch (Exception e) {
             logger.error("Error logging request", e);
         }
@@ -143,7 +155,7 @@ public class RequestLoggingService {
                 }
             }
             
-            logProcessors.forEach(processor -> processor.processRequestComplete(log));
+            logProcessors.forEach(processor -> processor.process(log));
         } catch (Exception e) {
             logger.error("Error logging response", e);
         }
@@ -188,7 +200,7 @@ public class RequestLoggingService {
                 log.setStackTrace(sw.toString());
             }
 
-            logProcessors.forEach(processor -> processor.processRequestError(log));
+            logProcessors.forEach(processor -> processor.process(log));
         } catch (Exception e) {
             logger.error("Error logging error", e);
         }
@@ -244,6 +256,177 @@ public class RequestLoggingService {
         traceId.remove();
         if (properties.isEnableMdcTrace()) {
             MDC.remove(properties.getTraceIdKey());
+        }
+    }
+
+    /**
+     * 处理请求日志
+     */
+    @Async("requestLoggingExecutor")
+    public void processRequestLog(ContentCachingRequestWrapper request, ContentCachingResponseWrapper response) {
+        if (!shouldProcess()) {
+            return;
+        }
+
+        RequestLog log = null;
+        try {
+            log = borrowRequestLog();
+            populateRequestLog(log, request, response);
+            processLog(log);
+        } catch (Exception e) {
+            logger.error("Error processing request log", e);
+        } finally {
+            returnRequestLog(log);
+        }
+    }
+
+    /**
+     * 处理请求错误日志
+     */
+    @Async("requestLoggingExecutor")
+    public void processRequestError(ContentCachingRequestWrapper request, ContentCachingResponseWrapper response, Exception exception) {
+        if (!shouldProcess()) {
+            return;
+        }
+
+        RequestLog log = null;
+        try {
+            log = borrowRequestLog();
+            populateErrorLog(log, request, response, exception);
+            processErrorLog(log);
+        } catch (Exception e) {
+            logger.error("Error processing error log", e);
+        } finally {
+            returnRequestLog(log);
+        }
+    }
+
+    private boolean shouldProcess() {
+        // 检查采样率
+        if (properties.getSamplingRate() < 100) {
+            double random = ThreadLocalRandom.current().nextDouble() * 100;
+            return random <= properties.getSamplingRate();
+        }
+        return true;
+    }
+
+    private RequestLog borrowRequestLog() {
+        try {
+            return properties.isEnableObjectPool() && requestLogPool != null
+                    ? requestLogPool.borrowObject()
+                    : new RequestLog();
+        } catch (Exception e) {
+            logger.warn("Failed to borrow RequestLog from pool, creating new instance", e);
+            return new RequestLog();
+        }
+    }
+
+    private void returnRequestLog(RequestLog log) {
+        if (log != null && properties.isEnableObjectPool() && requestLogPool != null) {
+            try {
+                requestLogPool.returnObject(log);
+            } catch (Exception e) {
+                logger.warn("Failed to return RequestLog to pool", e);
+            }
+        }
+    }
+
+    private void populateRequestLog(RequestLog log, ContentCachingRequestWrapper request, ContentCachingResponseWrapper response) {
+        log.setRequestTime(LocalDateTime.now());
+        log.setResponseTime(LocalDateTime.now());
+        log.setTraceId(traceId.get());
+        log.setSystemMetrics(systemMetricsCollector.collectMetrics());
+
+        if (request != null) {
+            log.setMethod(request.getMethod());
+            log.setUri(request.getRequestURI());
+            log.setQueryString(request.getQueryString());
+            log.setClientIp(getClientIp(request));
+            if (properties.isLogHeaders()) {
+                log.setHeaders(getHeaders(request));
+            }
+            if (properties.isLogRequestBody()) {
+                log.setRequestBody(getRequestBody(request));
+            }
+        }
+
+        if (response != null && properties.isLogResponse()) {
+            log.setStatus(response.getStatus());
+            log.setResponseBody(getResponseBody(response));
+        }
+    }
+
+    private void populateErrorLog(RequestLog log, ContentCachingRequestWrapper request, 
+                                ContentCachingResponseWrapper response, Exception exception) {
+        populateRequestLog(log, request, response);
+        
+        if (exception != null) {
+            log.setException(exception.getClass().getName());
+            log.setExceptionMessage(exception.getMessage());
+            StringWriter sw = new StringWriter();
+            exception.printStackTrace(new PrintWriter(sw));
+            log.setStackTrace(sw.toString());
+        }
+    }
+
+    private void processLog(RequestLog log) {
+        logProcessors.forEach(processor -> {
+            try {
+                processor.process(log);
+            } catch (Exception e) {
+                logger.error("Error in log processor: " + processor.getClass().getName(), e);
+            }
+        });
+    }
+
+    private void processErrorLog(RequestLog log) {
+        logProcessors.forEach(processor -> {
+            try {
+                processor.process(log);
+            } catch (Exception e) {
+                logger.error("Error in error log processor: " + processor.getClass().getName(), e);
+            }
+        });
+    }
+
+    private String getRequestBody(ContentCachingRequestWrapper request) {
+        byte[] content = request.getContentAsByteArray();
+        if (content.length == 0) {
+            return "";
+        }
+        
+        int length = Math.min(content.length, properties.getRequestBodyMaxLength());
+        try {
+            String body = new String(content, 0, length, request.getCharacterEncoding());
+            return properties.isJsonPrettyPrint() ? formatJson(body) : body;
+        } catch (Exception e) {
+            logger.warn("Failed to read request body", e);
+            return "[Failed to read request body]";
+        }
+    }
+
+    private String getResponseBody(ContentCachingResponseWrapper response) {
+        byte[] content = response.getContentAsByteArray();
+        if (content.length == 0) {
+            return "";
+        }
+        
+        int length = Math.min(content.length, properties.getResponseMaxLength());
+        try {
+            String body = new String(content, 0, length, response.getCharacterEncoding());
+            return properties.isJsonPrettyPrint() ? formatJson(body) : body;
+        } catch (Exception e) {
+            logger.warn("Failed to read response body", e);
+            return "[Failed to read response body]";
+        }
+    }
+
+    private String formatJson(String json) {
+        try {
+            Object jsonObject = JSON.parse(json);
+            return JSON.toJSONString(jsonObject, JSONWriter.Feature.PrettyFormat);
+        } catch (Exception e) {
+            return json;
         }
     }
 } 
