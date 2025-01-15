@@ -117,12 +117,12 @@ request-logging:
   max-history: 30                 # 日志保留天数（daily策略）
 
   # 性能相关配置
+  enable-async-logging: true               # 是否异步执行
   sampling-rate: 100                       # 采样率（0-100）
   async-logging: true                      # 是否启用异步日志
   async-core-pool-size: 2                  # 异步线程池核心线程数
   async-max-pool-size: 5                   # 异步线程池最大线程数
   async-queue-capacity: 100                # 异步线程池队列容量
-  enable-object-pool: true                 # 是否启用对象池
   object-pool-max-size: 200                # 对象池最大容量
   thread-name-prefix: "request-logging-"   # 对象异步线程的前缀名
 ```

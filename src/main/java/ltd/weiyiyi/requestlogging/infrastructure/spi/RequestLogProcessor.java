@@ -2,6 +2,7 @@ package ltd.weiyiyi.requestlogging.infrastructure.spi;
 
 import ltd.weiyiyi.requestlogging.domain.model.RequestLog;
 import ltd.weiyiyi.requestlogging.infrastructure.config.RequestLoggingProperties;
+import org.springframework.scheduling.annotation.Async;
 
 /**
  * 请求日志处理器接口
@@ -22,10 +23,22 @@ public interface RequestLogProcessor {
 
     /**
      * 处理请求日志
+     * 当异步功能未启用时使用此方法
      *
      * @param log 请求日志对象
      */
     void process(RequestLog log);
+
+    /**
+     * 异步处理请求日志
+     * 当异步功能启用时使用此方法
+     *
+     * @param log 请求日志对象
+     */
+    @Async("requestLoggingExecutor")
+    default void processAsync(RequestLog log) {
+        process(log);
+    }
 
     /**
      * 处理请求错误日志
@@ -34,6 +47,17 @@ public interface RequestLogProcessor {
      */
     default void processRequestError(RequestLog log) {
         process(log);
+    }
+
+    /**
+     * 异步处理请求错误日志
+     * 当异步功能启用时使用此方法
+     *
+     * @param log 请求日志对象
+     */
+    @Async("requestLoggingExecutor")
+    default void processRequestErrorAsync(RequestLog log) {
+        processRequestError(log);
     }
 
     /**

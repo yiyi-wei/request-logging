@@ -1,9 +1,14 @@
 package ltd.weiyiyi.requestlogging.infrastructure.config;
 
+import ltd.weiyiyi.requestlogging.application.service.AsyncLogProcessingService;
 import ltd.weiyiyi.requestlogging.application.service.RequestLoggingService;
 import ltd.weiyiyi.requestlogging.domain.model.RequestLog;
 import ltd.weiyiyi.requestlogging.infrastructure.filter.RequestLoggingFilter;
 import ltd.weiyiyi.requestlogging.infrastructure.util.SystemMetricsCollector;
+
+import org.apache.commons.pool2.BasePooledObjectFactory;
+import org.apache.commons.pool2.PooledObject;
+import org.apache.commons.pool2.impl.DefaultPooledObject;
 import org.apache.commons.pool2.impl.GenericObjectPool;
 import org.apache.commons.pool2.impl.GenericObjectPoolConfig;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -40,6 +45,12 @@ public class RequestLoggingAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    public AsyncLogProcessingService asyncLogProcessingService() {
+        return new AsyncLogProcessingService();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
     public GenericObjectPool<RequestLog> requestLogPool(RequestLoggingProperties properties) {
         if (!properties.isEnableObjectPool()) {
             return null;
@@ -62,8 +73,9 @@ public class RequestLoggingAutoConfiguration {
     public RequestLoggingService requestLoggingService(
             RequestLoggingProperties properties,
             GenericObjectPool<RequestLog> requestLogPool,
-            SystemMetricsCollector systemMetricsCollector) {
-        return new RequestLoggingService(properties, requestLogPool, systemMetricsCollector);
+            SystemMetricsCollector systemMetricsCollector,
+            AsyncLogProcessingService asyncLogProcessingService) {
+        return new RequestLoggingService(properties, requestLogPool, systemMetricsCollector, asyncLogProcessingService);
     }
 
     @Bean
@@ -76,15 +88,15 @@ public class RequestLoggingAutoConfiguration {
     /**
      * RequestLog对象池工厂
      */
-    private static class RequestLogPooledObjectFactory extends org.apache.commons.pool2.BasePooledObjectFactory<RequestLog> {
+    private static class RequestLogPooledObjectFactory extends BasePooledObjectFactory<RequestLog> {
         @Override
         public RequestLog create() {
             return new RequestLog();
         }
 
         @Override
-        public org.apache.commons.pool2.PooledObject<RequestLog> wrap(RequestLog requestLog) {
-            return new org.apache.commons.pool2.impl.DefaultPooledObject<>(requestLog);
+        public PooledObject<RequestLog> wrap(RequestLog requestLog) {
+            return new DefaultPooledObject<>(requestLog);
         }
 
         @Override

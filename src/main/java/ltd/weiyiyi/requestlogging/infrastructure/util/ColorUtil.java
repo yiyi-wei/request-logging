@@ -24,13 +24,13 @@ public class ColorUtil {
             code.append(parseColor(foregroundColor, true));
         }
         if (backgroundColor != null) {
-            if (code.length() > 0) {
+            if (!code.isEmpty()) {
                 code.append(";");
             }
             code.append(parseColor(backgroundColor, false));
         }
         
-        if (code.length() > 0) {
+        if (!code.isEmpty()) {
             return "\u001B[" + code + "m" + text + ANSI_RESET;
         }
         return text;

@@ -41,7 +41,7 @@ public class RequestLoggingProperties {
     /**
      * 是否启用异步日志
      */
-    private boolean asyncLogging = false;
+    private boolean enableAsyncLogging = true;
 
     /**
      * 采样率 (0.0-1.0)
@@ -357,12 +357,12 @@ public class RequestLoggingProperties {
         this.responseMaxLength = responseMaxLength;
     }
 
-    public boolean isAsyncLogging() {
-        return asyncLogging;
+    public boolean isEnableAsyncLogging() {
+        return enableAsyncLogging;
     }
 
-    public void setAsyncLogging(boolean asyncLogging) {
-        this.asyncLogging = asyncLogging;
+    public void setEnableAsyncLogging(boolean enableAsyncLogging) {
+        this.enableAsyncLogging = enableAsyncLogging;
     }
 
     public double getSamplingRate() {

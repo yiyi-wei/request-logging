@@ -4,7 +4,6 @@ import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONWriter;
 import ltd.weiyiyi.requestlogging.domain.model.RequestLog;
 import ltd.weiyiyi.requestlogging.infrastructure.config.RequestLoggingProperties;
-import ltd.weiyiyi.requestlogging.infrastructure.formatter.LogFormatter;
 import ltd.weiyiyi.requestlogging.infrastructure.processor.ConsoleLogProcessor;
 import ltd.weiyiyi.requestlogging.infrastructure.spi.RequestLogProcessor;
 import ltd.weiyiyi.requestlogging.infrastructure.util.SystemMetricsCollector;
@@ -12,17 +11,13 @@ import org.apache.commons.pool2.impl.GenericObjectPool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.web.util.ContentCachingRequestWrapper;
 import org.springframework.web.util.ContentCachingResponseWrapper;
 
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.ServiceLoader;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
@@ -35,19 +30,20 @@ public class RequestLoggingService {
     private static final Logger logger = LoggerFactory.getLogger(RequestLoggingService.class);
 
     private final RequestLoggingProperties properties;
-    private final LogFormatter logFormatter;
     private final List<RequestLogProcessor> logProcessors = new ArrayList<>();
     private final ThreadLocal<String> traceId = new ThreadLocal<>();
     private final GenericObjectPool<RequestLog> requestLogPool;
     private final SystemMetricsCollector systemMetricsCollector;
+    private final AsyncLogProcessingService asyncLogProcessingService;
 
     public RequestLoggingService(RequestLoggingProperties properties, 
                                GenericObjectPool<RequestLog> requestLogPool,
-                               SystemMetricsCollector systemMetricsCollector) {
+                               SystemMetricsCollector systemMetricsCollector,
+                               AsyncLogProcessingService asyncLogProcessingService) {
         this.properties = properties;
-        this.logFormatter = new LogFormatter(properties, systemMetricsCollector);
         this.requestLogPool = requestLogPool;
         this.systemMetricsCollector = systemMetricsCollector;
+        this.asyncLogProcessingService = asyncLogProcessingService;
         initLogProcessors();
     }
 
@@ -73,7 +69,7 @@ public class RequestLoggingService {
      * @param request HTTP请求对象
      */
     public void logRequest(ContentCachingRequestWrapper request) {
-        if (!shouldLog()) {
+        if (skipLogging()) {
             return;
         }
 
@@ -83,7 +79,7 @@ public class RequestLoggingService {
                 MDC.put(properties.getTraceIdKey(), currentTraceId);
             }
 
-            RequestLog log = new RequestLog();
+            RequestLog log = borrowRequestLog();
             log.setRequestTime(LocalDateTime.now());
             log.setTraceId(currentTraceId);
 
@@ -102,7 +98,7 @@ public class RequestLoggingService {
                 // 记录请求体
                 if (properties.isLogRequestBody()) {
                     byte[] content = request.getContentAsByteArray();
-                    if (content != null && content.length > 0) {
+                    if (content.length > 0) {
                         String requestBody = new String(content);
                         if (requestBody.length() > properties.getRequestBodyMaxLength()) {
                             requestBody = requestBody.substring(0, properties.getRequestBodyMaxLength()) + "...";
@@ -112,10 +108,31 @@ public class RequestLoggingService {
                 }
             }
             
-            logProcessors.forEach(processor -> processor.process(log));
+            if (properties.isEnableAsyncLogging()) {
+                processLogAsync(log);
+            } else {
+                processLogSync(log);
+            }
+
         } catch (Exception e) {
             logger.error("Error logging request", e);
         }
+    }
+
+    private RequestLog createBaseLog(ContentCachingRequestWrapper request) {
+        RequestLog log = new RequestLog();
+        log.setRequestTime(LocalDateTime.now());
+        log.setResponseTime(LocalDateTime.now());
+        log.setTraceId(traceId.get());
+
+        if (request != null) {
+            log.setMethod(request.getMethod());
+            log.setUri(request.getRequestURI());
+            log.setQueryString(request.getQueryString());
+            log.setClientIp(getClientIp(request));
+        }
+
+        return log;
     }
 
     /**
@@ -125,28 +142,18 @@ public class RequestLoggingService {
      * @param response HTTP响应对象
      */
     public void logResponse(ContentCachingRequestWrapper request, ContentCachingResponseWrapper response) {
-        if (!shouldLog()) {
+        if (skipLogging()) {
             return;
         }
 
         try {
-            RequestLog log = new RequestLog();
-            log.setRequestTime(LocalDateTime.now());
-            log.setResponseTime(LocalDateTime.now());
-            log.setTraceId(traceId.get());
-
-            if (request != null) {
-                log.setMethod(request.getMethod());
-                log.setUri(request.getRequestURI());
-                log.setQueryString(request.getQueryString());
-                log.setClientIp(getClientIp(request));
-            }
+            RequestLog log = createBaseLog(request);
 
             if (response != null && properties.isLogResponse()) {
                 log.setStatus(response.getStatus());
 
                 byte[] content = response.getContentAsByteArray();
-                if (content != null && content.length > 0) {
+                if (content.length > 0) {
                     String responseBody = new String(content);
                     if (responseBody.length() > properties.getResponseMaxLength()) {
                         responseBody = responseBody.substring(0, properties.getResponseMaxLength()) + "...";
@@ -155,7 +162,11 @@ public class RequestLoggingService {
                 }
             }
             
-            logProcessors.forEach(processor -> processor.process(log));
+            if (properties.isEnableAsyncLogging()) {
+                processLogAsync(log);
+            } else {
+                processLogSync(log);
+            }
         } catch (Exception e) {
             logger.error("Error logging response", e);
         }
@@ -169,22 +180,12 @@ public class RequestLoggingService {
      * @param exception 异常对象
      */
     public void logError(ContentCachingRequestWrapper request, ContentCachingResponseWrapper response, Exception exception) {
-        if (!shouldLog()) {
+        if (skipLogging()) {
             return;
         }
 
         try {
-            RequestLog log = new RequestLog();
-            log.setRequestTime(LocalDateTime.now());
-            log.setResponseTime(LocalDateTime.now());
-            log.setTraceId(traceId.get());
-
-            if (request != null) {
-                log.setMethod(request.getMethod());
-                log.setUri(request.getRequestURI());
-                log.setQueryString(request.getQueryString());
-                log.setClientIp(getClientIp(request));
-            }
+            RequestLog log = createBaseLog(request);
 
             if (response != null) {
                 log.setStatus(response.getStatus());
@@ -200,14 +201,21 @@ public class RequestLoggingService {
                 log.setStackTrace(sw.toString());
             }
 
-            logProcessors.forEach(processor -> processor.process(log));
+            if (properties.isEnableAsyncLogging()) {
+                processErrorLogAsync(log);
+            } else {
+                processErrorLogSync(log);
+            }
         } catch (Exception e) {
             logger.error("Error logging error", e);
         }
     }
 
-    private boolean shouldLog() {
-        return properties.isEnabled() && Math.random() < properties.getSamplingRate();
+    /**
+     * @return is skip these log
+     */
+    private boolean skipLogging() {
+        return !properties.isEnabled() || !(Math.floor(Math.random() * 100)  < properties.getSamplingRate());
     }
 
     private String generateTraceId() {
@@ -239,9 +247,9 @@ public class RequestLoggingService {
         return ip;
     }
 
-    private java.util.Map<String, String> getHeaders(ContentCachingRequestWrapper request) {
-        java.util.Map<String, String> headers = new java.util.HashMap<>();
-        java.util.Enumeration<String> headerNames = request.getHeaderNames();
+    private Map<String, String> getHeaders(ContentCachingRequestWrapper request) {
+        Map<String, String> headers = new HashMap<>();
+        Enumeration<String> headerNames = request.getHeaderNames();
         while (headerNames.hasMoreElements()) {
             String headerName = headerNames.nextElement();
             headers.put(headerName, request.getHeader(headerName));
@@ -262,9 +270,8 @@ public class RequestLoggingService {
     /**
      * 处理请求日志
      */
-    @Async("requestLoggingExecutor")
-    public void processRequestLog(ContentCachingRequestWrapper request, ContentCachingResponseWrapper response) {
-        if (!shouldProcess()) {
+    private void processRequestLog(ContentCachingRequestWrapper request, ContentCachingResponseWrapper response) {
+        if (skipProcess()) {
             return;
         }
 
@@ -272,7 +279,7 @@ public class RequestLoggingService {
         try {
             log = borrowRequestLog();
             populateRequestLog(log, request, response);
-            processLog(log);
+            // processLog(log);
         } catch (Exception e) {
             logger.error("Error processing request log", e);
         } finally {
@@ -280,34 +287,13 @@ public class RequestLoggingService {
         }
     }
 
-    /**
-     * 处理请求错误日志
-     */
-    @Async("requestLoggingExecutor")
-    public void processRequestError(ContentCachingRequestWrapper request, ContentCachingResponseWrapper response, Exception exception) {
-        if (!shouldProcess()) {
-            return;
-        }
-
-        RequestLog log = null;
-        try {
-            log = borrowRequestLog();
-            populateErrorLog(log, request, response, exception);
-            processErrorLog(log);
-        } catch (Exception e) {
-            logger.error("Error processing error log", e);
-        } finally {
-            returnRequestLog(log);
-        }
-    }
-
-    private boolean shouldProcess() {
+    private boolean skipProcess() {
         // 检查采样率
         if (properties.getSamplingRate() < 100) {
             double random = ThreadLocalRandom.current().nextDouble() * 100;
-            return random <= properties.getSamplingRate();
+            return !(random <= properties.getSamplingRate());
         }
-        return true;
+        return false;
     }
 
     private RequestLog borrowRequestLog() {
@@ -369,24 +355,44 @@ public class RequestLoggingService {
         }
     }
 
-    private void processLog(RequestLog log) {
+    /**
+     * 同步处理日志
+     */
+    private void processLogSync(RequestLog log) {
         logProcessors.forEach(processor -> {
             try {
                 processor.process(log);
             } catch (Exception e) {
-                logger.error("Error in log processor: " + processor.getClass().getName(), e);
+                logger.error("Error in log processor: {}", processor.getClass().getName(), e);
             }
         });
     }
 
-    private void processErrorLog(RequestLog log) {
+    /**
+     * 异步处理日志
+     */
+    private void processLogAsync(RequestLog log) {
+        asyncLogProcessingService.processLogAsync(logProcessors, log);
+    }
+
+    /**
+     * 同步处理错误日志
+     */
+    private void processErrorLogSync(RequestLog log) {
         logProcessors.forEach(processor -> {
             try {
-                processor.process(log);
+                processor.processRequestError(log);
             } catch (Exception e) {
-                logger.error("Error in error log processor: " + processor.getClass().getName(), e);
+                logger.error("Error in error log processor: {}", processor.getClass().getName(), e);
             }
         });
+    }
+
+    /**
+     * 异步处理错误日志
+     */
+    private void processErrorLogAsync(RequestLog log) {
+        asyncLogProcessingService.processErrorLogAsync(logProcessors, log);
     }
 
     private String getRequestBody(ContentCachingRequestWrapper request) {

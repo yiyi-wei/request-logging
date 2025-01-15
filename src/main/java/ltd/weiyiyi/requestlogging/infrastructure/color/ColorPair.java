@@ -1,7 +1,7 @@
 package ltd.weiyiyi.requestlogging.infrastructure.color;
 
 /**
- * 颜色对，包含前景色和背景色
+ * log 文字色和背景色
  *
  * @author weihan
  */

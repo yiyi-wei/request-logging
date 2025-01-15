@@ -19,12 +19,15 @@ public class ConsoleLogProcessor implements RequestLogProcessor {
 
     private RequestLoggingProperties properties;
     private LogFormatter logFormatter;
-    private SystemMetricsCollector systemMetricsCollector;
+    private final SystemMetricsCollector systemMetricsCollector = new SystemMetricsCollector();
+
+    public ConsoleLogProcessor() {
+        // 无参构造函数，用于SPI加载
+    }
 
     @Override
     public void init(RequestLoggingProperties properties) {
         this.properties = properties;
-        this.systemMetricsCollector = new SystemMetricsCollector();
         this.logFormatter = new LogFormatter(properties, systemMetricsCollector);
     }
 
@@ -44,16 +47,13 @@ public class ConsoleLogProcessor implements RequestLogProcessor {
     }
 
     private void logWithLevel(String message) {
-        switch (properties.getLogLevel().toUpperCase()) {
+        String logLevel = properties.getLogLevel().toUpperCase();
+        switch (logLevel) {
             case "ERROR" -> logger.error(message);
             case "WARN" -> logger.warn(message);
             case "DEBUG" -> logger.debug(message);
             case "TRACE" -> logger.trace(message);
             default -> logger.info(message);
         }
-    }
-
-    public ConsoleLogProcessor() {
-        // 无参构造函数，用于SPI加载
     }
 } 
